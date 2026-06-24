@@ -49,7 +49,6 @@ src/
 ├── seeders/ # Seed data
 ├── app.ts # Express app setup
 └── server.ts # Entry point
-
 tests/
 docs/
 
