@@ -36,6 +36,7 @@ This project is designed as a backend technical assessment demonstrating scalabl
 
 ## Project Structure
 
+
 src/
 ├── config/ # Environment & database configuration
 ├── controllers/ # Request handlers
@@ -51,6 +52,7 @@ src/
 └── server.ts # Entry point
 tests/
 docs/
+
 
 ---
 
