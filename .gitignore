@@ -1,0 +1,8 @@
+node_modules/
+dist/
+coverage/
+*.log
+
+# Never commit real secrets
+.env
+# .env.example is safe to commit — it has no real values

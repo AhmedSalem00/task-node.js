@@ -1,0 +1,498 @@
+openapi: 3.0.3
+info:
+  title: Project & Task Management API
+  description: >
+    RESTful API for managing projects and tasks, with JWT authentication
+    and role-based access control (admin / member).
+  version: 1.0.0
+servers:
+  - url: http://localhost:3000/api/v1
+    description: Local development server
+
+tags:
+  - name: Auth
+  - name: Projects
+  - name: Tasks
+  - name: Users
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  schemas:
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string }
+        email: { type: string, format: email }
+        role: { type: string, enum: [admin, member] }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Project:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [active, completed, archived] }
+        ownerId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    Task:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        title: { type: string }
+        description: { type: string, nullable: true }
+        status: { type: string, enum: [pending, in_progress, done] }
+        priority: { type: string, enum: [low, medium, high] }
+        dueDate: { type: string, format: date, nullable: true }
+        projectId: { type: string, format: uuid }
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+
+    PaginationMeta:
+      type: object
+      properties:
+        totalItems: { type: integer }
+        totalPages: { type: integer }
+        currentPage: { type: integer }
+        pageSize: { type: integer }
+
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        details: { type: array, items: { type: object } }
+
+  parameters:
+    PageParam:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    LimitParam:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 100, default: 10 }
+    SortByParam:
+      name: sortBy
+      in: query
+      schema: { type: string }
+    SortOrderParam:
+      name: sortOrder
+      in: query
+      schema: { type: string, enum: [ASC, DESC], default: DESC }
+
+security:
+  - bearerAuth: []
+
+paths:
+  /auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: >
+        Creates a new account with role `member`. The `role` field is
+        server-controlled and cannot be set by the client.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name: { type: string, minLength: 2, maxLength: 120, example: Jane Doe }
+                email: { type: string, format: email, example: jane@example.com }
+                password: { type: string, minLength: 8, maxLength: 100, example: SecurePass123 }
+      responses:
+        '201':
+          description: User registered successfully
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      token: { type: string }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409':
+          description: Email already exists
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/login:
+    post:
+      tags: [Auth]
+      summary: Login and receive a JWT access token
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email: { type: string, format: email }
+                password: { type: string }
+      responses:
+        '200':
+          description: Login successful, returns JWT token
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data:
+                    type: object
+                    properties:
+                      user: { $ref: '#/components/schemas/User' }
+                      token: { type: string }
+        '401':
+          description: Invalid credentials
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user
+      responses:
+        '200':
+          description: Current user profile
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  data: { $ref: '#/components/schemas/User' }
+        '401':
+          description: Missing or invalid token
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    put:
+      tags: [Auth]
+      summary: Update own profile (name or password)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name:            { type: string, minLength: 2, maxLength: 120, example: 'Jane Doe' }
+                currentPassword: { type: string, description: 'Required when changing password', example: 'OldPass123' }
+                password:        { type: string, minLength: 8, maxLength: 100, example: 'NewPass456' }
+      responses:
+        '200':
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string }
+                  data: { $ref: '#/components/schemas/User' }
+        '400': { description: Validation error }
+        '401': { description: Missing or invalid token }
+
+  /projects:
+    get:
+      tags: [Projects]
+      summary: List projects
+      description: >
+        Returns the authenticated user's projects (members see their own;
+        admins see all). Supports filtering by status, pagination, and sorting.
+      parameters:
+        - name: status
+          in: query
+          description: Filter by project status
+          schema: { type: string, enum: [active, completed, archived] }
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [createdAt, updatedAt, title, status], default: createdAt }
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Paginated list of projects
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Project' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+    post:
+      tags: [Projects]
+      summary: Create a new project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 2, maxLength: 150 }
+                description: { type: string, maxLength: 2000 }
+                status: { type: string, enum: [active, completed, archived] }
+      responses:
+        '201':
+          description: Project created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Project' }
+        '400':
+          description: Validation error
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /projects/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Projects]
+      summary: Get a single project by ID
+      responses:
+        '200':
+          description: Project found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Project' }
+        '403': { description: Access denied }
+        '404': { description: Project not found }
+    put:
+      tags: [Projects]
+      summary: Update project details
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 2, maxLength: 150 }
+                description: { type: string, maxLength: 2000 }
+                status: { type: string, enum: [active, completed, archived] }
+      responses:
+        '200':
+          description: Project updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Project' }
+        '400': { description: Validation error }
+        '403': { description: Access denied }
+        '404': { description: Project not found }
+    delete:
+      tags: [Projects]
+      summary: Delete a project and all its tasks
+      responses:
+        '200': { description: Project deleted }
+        '403': { description: Access denied }
+        '404': { description: Project not found }
+
+  /projects/{projectId}/tasks:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Tasks]
+      summary: List tasks for a project
+      description: Supports filtering by status and priority, plus pagination and sorting.
+      parameters:
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, in_progress, done] }
+        - name: priority
+          in: query
+          schema: { type: string, enum: [low, medium, high] }
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [createdAt, updatedAt, title, status, priority, dueDate], default: createdAt }
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Paginated list of tasks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/Task' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+        '403': { description: Access denied }
+        '404': { description: Project not found }
+    post:
+      tags: [Tasks]
+      summary: Create a task under a project
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [title]
+              properties:
+                title: { type: string, minLength: 2, maxLength: 150 }
+                description: { type: string, maxLength: 2000 }
+                status: { type: string, enum: [pending, in_progress, done] }
+                priority: { type: string, enum: [low, medium, high] }
+                dueDate: { type: string, format: date, example: '2026-08-01' }
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Task' }
+        '400': { description: Validation error }
+        '403': { description: Access denied }
+        '404': { description: Project not found }
+
+  /projects/{projectId}/tasks/{taskId}:
+    parameters:
+      - name: projectId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+      - name: taskId
+        in: path
+        required: true
+        schema: { type: string, format: uuid }
+    get:
+      tags: [Tasks]
+      summary: Get a single task by ID
+      responses:
+        '200':
+          description: Task found
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Task' }
+        '403': { description: Access denied }
+        '404': { description: Task not found }
+    put:
+      tags: [Tasks]
+      summary: Update a task
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                title: { type: string, minLength: 2, maxLength: 150 }
+                description: { type: string, maxLength: 2000 }
+                status: { type: string, enum: [pending, in_progress, done] }
+                priority: { type: string, enum: [low, medium, high] }
+                dueDate: { type: string, format: date }
+      responses:
+        '200':
+          description: Task updated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data: { $ref: '#/components/schemas/Task' }
+        '400': { description: Validation error }
+        '403': { description: Access denied }
+        '404': { description: Task not found }
+    delete:
+      tags: [Tasks]
+      summary: Delete a task
+      responses:
+        '200': { description: Task deleted }
+        '403': { description: Access denied }
+        '404': { description: Task not found }
+
+  /users:
+    get:
+      tags: [Users]
+      summary: List all users (admin only)
+      parameters:
+        - $ref: '#/components/parameters/PageParam'
+        - $ref: '#/components/parameters/LimitParam'
+        - name: sortBy
+          in: query
+          schema: { type: string, enum: [createdAt, name, email, role], default: createdAt }
+        - $ref: '#/components/parameters/SortOrderParam'
+      responses:
+        '200':
+          description: Paginated list of users
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+                  data:
+                    type: array
+                    items: { $ref: '#/components/schemas/User' }
+                  pagination: { $ref: '#/components/schemas/PaginationMeta' }
+        '403':
+          description: Forbidden — admin role required
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
